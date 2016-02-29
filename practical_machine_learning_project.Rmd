@@ -1,0 +1,101 @@
+---
+output: html_document
+---
+# Course Project for Practical Machine Learning
+#### John Karlovic
+#### February 24, 2016
+
+### Synopsis
+“Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).”
+
+### Data Loading and Preparation
+We require several libraries to perform the analysis.
+``` {r loadlibraries, warning=FALSE, results='hide'}
+library(lattice)
+library(ggplot2)
+library(caret)
+library(randomForest)
+```
+The data sets must be downloaded and read into R. It has previously been split into training and test sets.
+``` {r loaddata, cache=TRUE, warning=FALSE}
+url.Train.data <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url.Test.data <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+train.data <- "pml-training.csv"
+# Check if file already exists in the working directory for each dataset, if not, then download.
+if (file.exists(train.data)) {
+  training <- read.csv(train.data, na.strings=c("NA", "#DIV/0!", ""))
+} else {
+  download.file(url.Train.data,train.data, method = "curl")
+  training <- read.csv(train.data, na.strings=c("NA", "#DIV/0!", ""))
+}
+test.data <- "pml-testing.csv"
+if (file.exists(test.data)) {
+  testing <- read.csv(test.data, na.strings=c("NA", "#DIV/0!", ""))
+} else {
+  download.file(url.Test.data,test.data, method = "curl")
+  testing <- read.csv(test.data, na.strings=c("NA", "#DIV/0!", ""))
+}
+
+# Set the seed for random number generator to ensure reproducibility.
+set.seed(345322)
+
+# Note: download and load operations are cached for performance.
+```
+There are a lot of variables in the data set. Both structure and summary will present truncated output, as demonstrated in the data set (training) dimensions: 
+``` {r dimensions, echo=FALSE}
+dim(training)
+```
+Exploratory visualization is obviously not useful in this instance.
+
+We need to prune down the less useful variables to improve prediction accuracy.
+
+Near zero variance variables are uninteresting and error inducing. Let's remove them with the caret package.
+``` {r removeNZV, eval=FALSE}
+near.zero <- nearZeroVar(training, saveMetrics = TRUE)
+training <- training[, !near.zero$nzv]
+# Note: cached for performance.
+```
+This removed 36 variables. Let's now remove any variables that are majority NAs - these interfere with nearly every machine learning method.
+``` {r removeNA}
+removed <- sapply(colnames(training), function(x) if(sum(is.na(training[,x])) > .5*nrow(training)) { return(TRUE) } else { return(FALSE) } )
+training <- training[, !removed]
+```
+This operation removed another 65 less-than-useful variables. The data set contains data collection variables that are unrelated to our desired predictions, let's remove them. Conveniently, they are the first six columns!
+``` {r removeunrelated}
+training <- training[, -(1:6)]
+```
+This leaves us with 52 predictors to train the model. Many of the factors are highly correlated (since they are pieces of the same exercise), so we will use PCA in our cross-validation (nine-fold) to reduce error. This will hopefully reduce the chances of overfit as well.
+``` {r crossvalidation}
+train.control <- trainControl(method = "cv", number = 9, verboseIter = FALSE, preProcOptions = "pca", allowParallel = TRUE)
+```
+The data is now ready to have the model fitted!
+
+### Model Fitting
+We are concerned with classifying the type of activity from the various measures of movement. Since a decision tree is the most appropriate model type to fit, we will use Random Forest since it is a more optimized version of classic decision trees.
+``` {r modelfit, cache=TRUE}
+r.forest <- train(classe ~ ., data = training, method = "rf", trControl = train.control)
+# Note: cached for performance. CV'd RF are process intensive.
+```
+Let's look at our modeling results: 
+``` {r results}
+r.forest$results
+```
+
+Accuracy is extremely high in the training set. The final optimal number of predictors sampled for each node split was 27.
+
+As for out of bag error, it should be extremely low with nine fold cross validation on top of the random sampling of predictor (inherent in the RF method); let's take a look at the final model produced: 
+``` {r finmodel}
+r.forest$finalModel
+```
+
+This appears to be an excellent model! Our only concern was overfit and the RF method expects less than .5% generalization error.
+
+Now that we have the model, let's apply the predictions to the testing set.
+
+``` {r predicttest}
+r.forest.pred <- predict(r.forest, testing)
+print(r.forest.pred)
+```
+### Conclusion
+
+Although the actual testing of the model is through the automated course submission, we should expect the model to perform admirably barring some execution error. The training set was so receptive to the Random Forest method that the data seems almost doctored, or perhaps the ML is just strong enough to map the entire possibility of the data set. Regardless, it is clear that Random Forest is an exceptional method to interogate how well a particular activity is being performed as measured by the tracking device (i.e. model prediction accuracy).
